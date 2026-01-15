@@ -3,7 +3,7 @@ import os, csv, numpy as np, torch
 import pickle
 from torch.utils.data import Dataset
 
-# --------- 读列表 / 标签工具 ---------
+# --------- Read List / Label Tools ---------
 def _basename(x: str) -> str:
     x = x.strip()
     if not x: return x
@@ -19,10 +19,10 @@ def read_slide_list(path: str):
                 ids.append(sid)
     return ids
 
-# [NEW] C17 专用标签加载工具
+# [NEW] C17 Specific Label Loading Tool
 def load_c17_labels(txt_path: str, npy_path: str):
     """
-    读取 txt (文件名) 和 npy (标签)，将它们通过索引对应成 dict
+    Read txt (filenames) and npy (labels), mapping them via index into a dict
     """
     names = read_slide_list(txt_path)
     labels = np.load(npy_path) 
@@ -38,13 +38,13 @@ def load_c17_labels(txt_path: str, npy_path: str):
         mp[name] = int(lab)
     return mp
 
-# [NEW] TCGA (LUAD/LUSC) 专用读取工具
+# [NEW] TCGA (LUAD/LUSC) Specific Reader
 def read_tcga_csv(csv_path: str):
     """
-    读取 TCGA CSV 文件。
-    假设格式：
-    Column 0: Slide ID (例如 TCGA-18-3406-...)
-    Column 1: Label String (TCGA-LUAD 或 TCGA-LUSC) 或 int
+    Read TCGA CSV file.
+    Assumed format:
+    Column 0: Slide ID (e.g. TCGA-18-3406-...)
+    Column 1: Label String (TCGA-LUAD or TCGA-LUSC) or int
     
     Returns:
         mp: {slide_id: label_int} (LUAD=0, LUSC=1)
@@ -57,11 +57,11 @@ def read_tcga_csv(csv_path: str):
             sid = row[0].strip()
             label_str = row[1].strip()
             
-            # 跳过常见表头
+            # Skip common headers
             if sid.lower() in ["slide_id", "id", "case_id", "filename", "file_name"]: continue
             
-            # 映射标签：TCGA-LUAD -> 0, TCGA-LUSC -> 1
-            # 同时也兼容如果是数字的情况
+            # Map labels: TCGA-LUAD -> 0, TCGA-LUSC -> 1
+            # Compatible with numeric labels
             if "LUAD" in label_str.upper():
                 mp[sid] = 0
             elif "LUSC" in label_str.upper():
@@ -71,12 +71,12 @@ def read_tcga_csv(csv_path: str):
             elif label_str == "1":
                 mp[sid] = 1
             else:
-                # 最后的兜底，如果包含 Normal 可能要处理，目前假设只有 LUAD/LUSC
+                # Fallback for unknown labels (e.g., Normal), assuming only LUAD/LUSC for now
                 pass
     return mp
 
 def infer_label_from_name(sid: str) -> int:
-    # 旧逻辑保留作为兜底
+    # Legacy logic retained as fallback
     s = sid.lower()
     if "tumor" in s or "cancer" in s or "positive" in s or "pos" in s:
         return 1
@@ -85,7 +85,7 @@ def infer_label_from_name(sid: str) -> int:
     return 0
 
 def read_label_csv(csv_path: str):
-    # 旧逻辑保留
+    # Legacy logic retained
     mp = {}
     with open(csv_path, "r", encoding="utf-8") as f:
         reader = csv.reader(f)
@@ -101,10 +101,10 @@ def read_label_csv(csv_path: str):
             else: raise ValueError(f"Unknown label value in CSV: {lab}")
     return mp
 
-# --------- I/O 工具 ---------
+# --------- I/O Tools ---------
 
 def _load_bag(root_dir: str, sid: str, feat_dim: int):
-    # 旧逻辑保留 (用于通用npy)
+    # Legacy logic retained (for generic npy)
     p1 = os.path.join(root_dir, sid, "features.npy")
     p2 = os.path.join(root_dir, f"{sid}.npy")
     if os.path.isfile(p1): arr = np.load(p1)
@@ -114,11 +114,11 @@ def _load_bag(root_dir: str, sid: str, feat_dim: int):
         raise ValueError(f"{sid} feature shape {arr.shape} != (N,{feat_dim})")
     return torch.from_numpy(arr).float()
 
-# [NEW] C17 / TCGA 通用 PKL 读取逻辑
+# [NEW] C17 / TCGA Generic PKL Reader
 def _load_c17_pkl(path: str, feat_dim: int):
     """
-    读取 .pkl 文件，结构为 list[dict]，dict key='feature'
-    兼容 C17 和 TCGA 数据格式
+    Read .pkl file, structure: list[dict], dict key='feature'
+    Compatible with C17 and TCGA data formats
     """
     if not os.path.isfile(path):
         raise FileNotFoundError(f"Feature file not found: {path}")
@@ -126,7 +126,7 @@ def _load_c17_pkl(path: str, feat_dim: int):
     with open(path, 'rb') as f:
         data_list = pickle.load(f) # List[Dict]
 
-    # 提取 feature 字段
+    # Extract feature field
     feats = []
     for item in data_list:
         if 'feature' in item:
@@ -141,12 +141,12 @@ def _load_c17_pkl(path: str, feat_dim: int):
     arr = np.stack(feats) # [N, feat_dim]
     
     if arr.ndim != 2 or arr.shape[1] != feat_dim:
-        # 有时候 moco 是 2048 维，ctrans 是 768 维，这里做个简单检查
+        # Simple check for dimension mismatch (e.g. moco is 2048, ctrans is 768)
         raise ValueError(f"Feature shape mismatch in {path}: {arr.shape} != (N, {feat_dim})")
         
     return torch.from_numpy(arr).float()
 
-# --------- 单尺度数据集 ---------
+# --------- Single Scale Dataset ---------
 class SlideBagDataset(Dataset):
     def __init__(self, root_dir: str, slide_ids, label_map=None, feat_dim: int = 768):
         self.root_dir = root_dir
@@ -161,7 +161,7 @@ class SlideBagDataset(Dataset):
         y = torch.tensor([y], dtype=torch.long)
         return xb, y, sid
 
-# [New] C16 专用多尺度数据集
+# [New] C16 Specific Multi-Scale Dataset
 class C16MultiScaleDataset(Dataset):
     def __init__(self, root_dir: str, slide_ids, label_map=None,
                  feat_dim_high: int = 768, feat_dim_low: int = 768):
@@ -214,7 +214,7 @@ class C16MultiScaleDataset(Dataset):
         y = torch.tensor([y_val], dtype=torch.long)
         return (xh, xl), y, sid
 
-# --------- C17 专用多尺度数据集 ---------
+# --------- C17 Specific Multi-Scale Dataset ---------
 class Camelyon17MultiScaleDataset(Dataset):
     def __init__(self, root_dir_high: str, root_dir_low: str, 
                  slide_ids, label_map=None,
@@ -245,13 +245,13 @@ class Camelyon17MultiScaleDataset(Dataset):
         
         return (xh, xl), y, sid
 
-# --------- [NEW] TCGA (LUAD/LUSC) 专用多尺度数据集 ---------
+# --------- [NEW] TCGA (LUAD/LUSC) Specific Multi-Scale Dataset ---------
 class TCGAMultiScaleDataset(Dataset):
     def __init__(self, luad_dir: str, lusc_dir: str, 
                  slide_ids: list, label_map: dict,
                  feat_dim_high: int = 768, feat_dim_low: int = 768):
         """
-        根据 Label (0=LUAD, 1=LUSC) 自动去 luad_dir 或 lusc_dir 找文件
+        Automatically find files in luad_dir or lusc_dir based on Label (0=LUAD, 1=LUSC)
         """
         self.ids = list(slide_ids)
         self.label_map = label_map
@@ -268,20 +268,20 @@ class TCGAMultiScaleDataset(Dataset):
         y_val = self.label_map.get(sid)
         
         if y_val is None:
-            # 如果没有标签，默认抛错或者 print warning
+            # If no label, raise error or print warning
             raise ValueError(f"Label not found for {sid} in TCGA map")
 
         # 0 -> LUAD, 1 -> LUSC
         root_dir = self.luad_dir if y_val == 0 else self.lusc_dir
         
-        # 拼接文件名
+        # Construct filename
         name_h = f"{sid}_high_feature_ctrans.pkl"
         name_l = f"{sid}_low_feature_ctrans.pkl"
         
         path_h = os.path.join(root_dir, name_h)
         path_l = os.path.join(root_dir, name_l)
         
-        # 复用 _load_c17_pkl
+        # Reuse _load_c17_pkl
         xh = _load_c17_pkl(path_h, self.fdh)
         xl = _load_c17_pkl(path_l, self.fdl)
         
@@ -289,7 +289,7 @@ class TCGAMultiScaleDataset(Dataset):
         
         return (xh, xl), y, sid
 
-# --------- collate 函数 ---------
+# --------- Collate Functions ---------
 def collate_bag(batch):
     assert len(batch) == 1, "Recommended batch_size=1 for MIL"
     xb, y, sid = batch[0]
