@@ -7,7 +7,7 @@
 The framework supports **Dual-Scale (High/Low Magnification)** integration to mimic the pathologist's workflow of zooming in and out.
 
 <div align="center">
-  <img src="./assets/完整流程图.png" alt="ReCo-MIL Framework Architecture" width="800"/>
+  <img src="./assets/完整流程图.drawio.png" alt="ReCo-MIL Framework Architecture" width="800"/>
   <br>
   <em>Figure 1: Overview of the ReCo-MIL Framework Architecture.</em>
 </div>
