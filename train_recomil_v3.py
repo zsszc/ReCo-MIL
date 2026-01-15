@@ -10,14 +10,12 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.amp import autocast, GradScaler
 
-# ---- 本地模块 ----
 from recomil_model import ReCoMIL
 from dual_recomil import DualReCoMIL
 from rarity_gate import rarity_gate
 from orth_regularizer import orth_loss
 from rare_weight import load_rare_weights
 
-# 统一使用你提供的 reco_dataset.py
 from reco_dataset import (
     read_slide_list,
     read_label_csv,
@@ -52,7 +50,6 @@ def evaluate(model, loader, device, num_classes=2, split_name="val", multi_scale
     total, correct = 0, 0
 
     if loader is None:
-        # 无验证集模式
         return {"acc": float("nan"), "auc": float("nan")}
 
     for batch in loader:
@@ -93,7 +90,6 @@ def evaluate(model, loader, device, num_classes=2, split_name="val", multi_scale
     except Exception:
         pass
 
-    # W&B 可视化（失败忽略）
     try:
         cm_plot = wandb.plot.confusion_matrix(
             probs=None, y_true=y_true.tolist(), preds=y_hat.tolist(),
@@ -124,7 +120,6 @@ def main():
     ap.add_argument("--test_csv", required=True)
     ap.add_argument("--val_split", type=float, default=0.10)
 
-    # 新增：全量训练 & 策略
     ap.add_argument("--no_val", action="store_true",
                     help="不划分验证集：全部 train_list 用于训练；保存策略按 --save_policy")
     ap.add_argument("--save_policy", default="joint",
@@ -143,7 +138,7 @@ def main():
     ap.add_argument("--route_topk_high", type=int, default=3)
     ap.add_argument("--use_graph_reducer_high", action="store_true")
     ap.add_argument("--graph_thresh_high", type=float, default=0.15)
-    ap.add_argument("--freq_path_high", default=None)        # 稀有簇权重
+    ap.add_argument("--freq_path_high", default=None)        
     ap.add_argument("--rare_beta_high", type=float, default=0.3)
     ap.add_argument("--freeze_protos_epochs_high", type=int, default=12)
     ap.add_argument("--outlier_top_p_high", type=float, default=0.015)
@@ -171,11 +166,11 @@ def main():
 
     # train
     ap.add_argument("--num_classes", type=int, default=2)
-    ap.add_argument("--epochs", type=int, default=200)
+    ap.add_argument("--epochs", type=int, default=50)
     ap.add_argument("--lr", type=float, default=1e-4)
-    ap.add_argument("--weight_decay", type=float, default=5e-5)
+    ap.add_argument("--weight_decay", type=float, default=5e-4)
     ap.add_argument("--warmup_epochs", type=int, default=12)
-    ap.add_argument("--patience", type=int, default=50)
+    ap.add_argument("--patience", type=int, default=10)
     ap.add_argument("--min_delta", type=float, default=0.0)
     ap.add_argument("--batch_size", type=int, default=1)
     ap.add_argument("--workers", type=int, default=0)
@@ -203,7 +198,6 @@ def main():
     ap.add_argument("--wandb_mode", default="online", choices=["online", "offline", "disabled"])
     ap.add_argument("--watch", action="store_true")
 
-    # 打印频率（默认 1：每步都打印）
     ap.add_argument("--print_every", type=int, default=100,
                     help=">0 则每 N 步打印一次 batch 级别 CE/ortho/total；默认 1")
 
@@ -251,12 +245,8 @@ def main():
         "data/val_pos_rate": pos_rate(va_ids) if len(va_ids) else float("nan")
     }, step=0)
 
-# 单/多尺度数据集 & loaders
     if multi_scale:
         # ----------------- [MODIFIED for C16] -----------------
-        # 注意：args.root_dir_high 现在传入 C16 的根目录即可 (e.g. /home/Public/zsc/C16/)
-        # C16MultiScaleDataset 会自动在内部找 train/normal, train/tumor, test
-        
         ds_tr = C16MultiScaleDataset(
             root_dir=args.root_dir_high, 
             slide_ids=tr_ids, 
@@ -327,7 +317,7 @@ def main():
     opt = torch.optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     scaler = GradScaler('cuda', enabled=args.fp16)
 
-    # class weights（可选）
+    # class weights
     class_w = None
     if args.class_weight:
         pr = pos_rate(tr_ids)
@@ -335,7 +325,6 @@ def main():
         w1 = 0.5 / max(1e-6, pr if pr > 0 else 1e-6)
         class_w = torch.tensor([w0, w1], dtype=torch.float32, device=device)
 
-    # 稀有簇权重
     w_high = load_rare_weights(args.freq_path_high, args.rare_beta_high, device, args.num_protos_high)
     w_low  = load_rare_weights(args.freq_path_low , args.rare_beta_low , device, args.num_protos_low) if multi_scale else None
 
@@ -392,7 +381,6 @@ def main():
         else:
             set_proto_trainable(epoch > args.freeze_protos_epochs_high, False)
 
-        # ---- 分项 loss 统计器 ----
         ce_sum, ortho_h_sum, ortho_l_sum, total_sum, num_steps = 0.0, 0.0, 0.0, 0.0, 0
 
         # one epoch
@@ -403,7 +391,7 @@ def main():
                 xl = xl.to(device, non_blocking=True)
                 yb = yb.to(device, non_blocking=True).view(-1)
 
-                # rarity gate（可选）
+                # rarity gate
                 if args.outlier_top_p_high > 0 and args.outlier_alpha_high > 0:
                     if args.gate_in_embed_high:
                         with torch.no_grad():
@@ -444,7 +432,6 @@ def main():
                     logits = out["logits"]
                     ce = F.cross_entropy(logits, yb, label_smoothing=args.label_smoothing, weight=class_w)
 
-                    # 正交分项
                     ortho_h_term = torch.tensor(0.0, device=device)
                     ortho_l_term = torch.tensor(0.0, device=device)
                     if args.lambda_ortho_high > 0:
@@ -462,7 +449,6 @@ def main():
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
                 scaler.step(opt); scaler.update()
 
-                # —— 统计/打印 —— #
                 num_steps += 1
                 ce_sum      += float(ce.detach().cpu())
                 ortho_h_sum += float(ortho_h_term.detach().cpu())
@@ -479,7 +465,7 @@ def main():
                 xb = xb.to(device, non_blocking=True)
                 yb = yb.to(device, non_blocking=True).view(-1)
 
-                # rarity gate（可选）
+                # rarity gate
                 if args.outlier_top_p_high > 0 and args.outlier_alpha_high > 0:
                     if args.gate_in_embed_high:
                         with torch.no_grad():
@@ -523,11 +509,9 @@ def main():
                     print(f"  step {num_steps:4d} | CE {ce_sum/num_steps:.4f} | "
                           f"ortho_h {ortho_h_sum/num_steps:.4f} | total {total_sum/num_steps:.4f}")
 
-        # ---- 验证（或占位） ----
         val_metrics = evaluate(model, dl_va, device, args.num_classes, "val", multi_scale=multi_scale)
         dt = time.time() - t0
 
-        # —— 控制台：epoch 汇总 —— #
         avg_ce  = ce_sum / max(1, num_steps)
         avg_oh  = ortho_h_sum / max(1, num_steps)
         avg_ol  = ortho_l_sum / max(1, num_steps) if multi_scale else 0.0
@@ -546,7 +530,6 @@ def main():
                   f"val_acc {val_metrics['acc']:.4f} | val_auc {val_metrics['auc']:.4f} | "
                   f"lr {cur_lr:.2e} | tau {tau:.3f} | time {dt:.1f}s")
 
-        # —— W&B：记录分项与总 loss —— #
         log_dict = {
             "epoch": epoch,
             "train/ce": avg_ce,
@@ -564,16 +547,15 @@ def main():
             log_dict["train/tau"] = model.tau
         wandb.log(log_dict)
 
-        # ---- 选优/保存策略 ----
         if args.no_val:
             if args.save_policy == "train_loss":
-                score = -avg_tot               # 训练总损失越小越好
+                score = -avg_tot               
             elif args.save_policy == "last":
-                score = epoch                  # 始终覆盖，最后一个即“最优”
+                score = epoch                  
             elif args.save_policy == "val_acc":
-                score = float("-inf")          # 无 val，防呆
+                score = float("-inf")          
             else:  # "val_auc"
-                score = float("-inf")          # 无 val，防呆
+                score = float("-inf")         
         else:
             if args.save_policy == "val_acc":
                 score = val_metrics["acc"]
@@ -596,7 +578,6 @@ def main():
                 pass
         else:
             epochs_no_improve += 1
-            # no_val + last：不早停；其余按 patience
             if not (args.no_val and args.save_policy == "last"):
                 if epochs_no_improve >= args.patience:
                     print(f"Early stopping at epoch {epoch} (best={best_score:.4f})")
