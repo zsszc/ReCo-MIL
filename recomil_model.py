@@ -107,7 +107,6 @@ class ReCoMIL(nn.Module):
 
         # Init Protos
         if proto_init_path:
-            # 推理时如果不传path，会随机初始化，但load_state_dict会覆盖它，所以无所谓
             try:
                 obj = torch.load(proto_init_path, map_location="cpu")
                 if isinstance(obj, torch.Tensor):
@@ -120,7 +119,6 @@ class ReCoMIL(nn.Module):
             except:
                 initial = torch.randn(num_protos, dim_in)
             
-            # 尺寸校验
             if initial.shape[0] != num_protos: 
                 initial = torch.randn(num_protos, dim_in)
                 
@@ -265,8 +263,6 @@ class ReCoMIL(nn.Module):
         Y_prob = F.softmax(logits, dim=1)
         Y_hat = torch.topk(logits, 1, dim=1)[1]
 
-        # --- KEY CHANGE for Heatmap ---
-        # 截取前 N 个作为 Patch 的注意力
         num_patches = P.size(0)
         patch_attn = attn_w[:, :num_patches] # [1, N]
 
