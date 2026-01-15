@@ -11,7 +11,7 @@ def set_seed(seed):
         pass
 
 def load_ids(ids_file):
-    """旧有的 txt 读取逻辑 (C17/Legacy用)"""
+    """Legacy txt reading logic (for C17/Legacy)"""
     if ids_file is None:
         return None
     ids = []
@@ -26,7 +26,7 @@ def load_ids(ids_file):
 
 def read_tcga_csv(csv_path):
     """
-    读取 TCGA CSV 文件获取 ID 和 类别 (LUAD/LUSC)
+    Read TCGA CSV file to get ID and Label (LUAD/LUSC)
     Returns: dict {slide_id: label_str}
     """
     info = {}
@@ -38,9 +38,9 @@ def read_tcga_csv(csv_path):
         for row in reader:
             if not row or len(row) < 2: continue
             sid = row[0].strip()
-            label = row[1].strip().upper() # 转大写方便判断
+            label = row[1].strip().upper() # Convert to uppercase for easier comparison
             
-            # 跳过表头
+            # Skip header
             if sid.lower() in ["slide_id", "id", "case_id", "filename"]: continue
             
             info[sid] = label
@@ -48,7 +48,7 @@ def read_tcga_csv(csv_path):
 
 def load_pkl_features(path, feat_dim):
     """
-    读取 pkl 文件: List[Dict{'feature': np.array, ...}]
+    Read pkl file: List[Dict{'feature': np.array, ...}]
     """
     if not os.path.isfile(path):
         return None
@@ -70,11 +70,11 @@ def load_pkl_features(path, feat_dim):
 
     arr = np.stack(feats) # [N, D]
     
-    # 简单的维度检查
+    # Simple dimension check
     if arr.ndim != 2:
         return None
         
-    # 如果维度不匹配 (例如 moco是2048但这就要求768)，这里最好做个警告或过滤
+    # If dimensions do not match (e.g., moco is 2048 but 768 is required), warn or filter here
     if arr.shape[1] != feat_dim:
         print(f"[Warn] Dim mismatch in {os.path.basename(path)}: {arr.shape[1]} vs {feat_dim}")
         return None
@@ -82,7 +82,7 @@ def load_pkl_features(path, feat_dim):
     return arr.astype(np.float32)
 
 def iter_slide_arrays(root_dir, allow_ids=None):
-    # 旧有的 npy 遍历逻辑
+    # Legacy npy traversal logic
     for name in sorted(os.listdir(root_dir)):
         if allow_ids is not None and name not in allow_ids:
             continue
@@ -92,7 +92,7 @@ def iter_slide_arrays(root_dir, allow_ids=None):
 
 def sample_arrays(args):
     """
-    根据 args 配置加载数据
+    Load data according to args configuration
     """
     xs = []
     total_used = 0
@@ -109,7 +109,7 @@ def sample_arrays(args):
         print(f"  - LUAD Dir: {args.luad_dir}")
         print(f"  - LUSC Dir: {args.lusc_dir}")
         
-        # 1. 读取 CSV
+        # 1. Read CSV
         slide_map = read_tcga_csv(args.train_csv)
         print(f"[clustering] Loaded {len(slide_map)} slides from CSV.")
         
@@ -119,28 +119,28 @@ def sample_arrays(args):
         for sid in ids_list:
             label = slide_map[sid]
             
-            # 2. 确定文件夹
-            # 逻辑：如果标签含LUAD或为0 -> luad_dir；含LUSC或为1 -> lusc_dir
+            # 2. Determine directory
+            # Logic: if label contains LUAD or is 0 -> luad_dir; if LUSC or 1 -> lusc_dir
             target_dir = None
             if "LUAD" in label or label == "0":
                 target_dir = args.luad_dir
             elif "LUSC" in label or label == "1":
                 target_dir = args.lusc_dir
             else:
-                # 无法判断类别的跳过
+                # Skip if label cannot be determined
                 continue
                 
-            # 3. 构造文件名 (ID + _high/low_feature_ctrans.pkl)
+            # 3. Construct filename (ID + _high/low_feature_ctrans.pkl)
             fname = f"{sid}_{scale}_feature_ctrans.pkl"
             full_path = os.path.join(target_dir, fname)
             
-            # 4. 加载
+            # 4. Load
             arr = load_pkl_features(full_path, feat_dim)
             if arr is None:
                 # print(f"File not found or invalid: {full_path}")
                 continue
                 
-            # 5. 采样
+            # 5. Sampling
             if sample_ratio < 1.0:
                 n = arr.shape[0]
                 m = max(1, int(n * sample_ratio))
@@ -159,11 +159,11 @@ def sample_arrays(args):
     # ================= C17 Mode =================
     elif args.dataset == "c17":
         print(f"[clustering] C17 Mode. Scanning {root_dir}...")
-        allow_ids = load_ids(args.ids_file) # C17用txt
+        allow_ids = load_ids(args.ids_file) # Use txt for C17
         if allow_ids is None:
             raise ValueError("In C17 mode, --ids_file (train.txt) is required.")
             
-        # 预扫描
+        # Pre-scan
         file_map = {}
         for root, dirs, files in os.walk(root_dir):
             for f in files:
@@ -181,7 +181,7 @@ def sample_arrays(args):
             arr = load_pkl_features(p, feat_dim)
             if arr is None: continue
             
-            # 采样
+            # Sampling
             if sample_ratio < 1.0:
                 n = arr.shape[0]
                 m = max(1, int(n * sample_ratio))
@@ -225,7 +225,7 @@ def sample_arrays(args):
 def main():
     ap = argparse.ArgumentParser("MiniBatch-KMeans for ReCo-MIL prototypes")
     
-    # 通用参数
+    # Common arguments
     ap.add_argument("--dataset", type=str, default="tcga", choices=["c17", "tcga", "legacy"], 
                     help="Dataset mode: 'c17' (pkl search), 'tcga' (luad/lusc folders), 'legacy' (npy)")
     ap.add_argument("--feat_dim", type=int, default=768)
@@ -238,29 +238,29 @@ def main():
     ap.add_argument("--save_protos", required=True)
     ap.add_argument("--save_freq", default=None)
     
-    # 尺度 (for TCGA & C17)
+    # Scale (for TCGA & C17)
     ap.add_argument("--scale", type=str, default="high", choices=["high", "low"])
     
-    # TCGA 专用参数
+    # TCGA specific arguments
     ap.add_argument("--train_csv", default=None, help="Path to TCGA train csv")
     ap.add_argument("--luad_dir", default="/home/Public/WSI/TCGA-LUAD", help="TCGA-LUAD feature dir")
     ap.add_argument("--lusc_dir", default="/home/Public/WSI/TCGA-LUSC", help="TCGA-LUSC feature dir")
     
-    # C17 / Legacy 专用参数
+    # C17 / Legacy specific arguments
     ap.add_argument("--root_dir", default=None, help="Root dir for C17/Legacy")
     ap.add_argument("--ids_file", default=None, help="txt file for C17/Legacy")
 
-    # 兼容旧代码的 flag (可选，如果用 dataset 参数则不需要)
+    # Compatibility flag (optional, not needed if dataset arg is used)
     ap.add_argument("--c17_mode", action="store_true", help="Deprecated, use --dataset c17")
 
     args = ap.parse_args()
     set_seed(args.seed)
 
-    # 兼容性处理：如果传了 --c17_mode 但没设 dataset，自动设为 c17
+    # Compatibility handling: if --c17_mode is passed but dataset is not set, auto-set to c17
     if args.c17_mode and args.dataset == "legacy": 
         args.dataset = "c17"
 
-    # 执行数据加载
+    # Execute data loading
     X = sample_arrays(args)
 
     from sklearn.cluster import MiniBatchKMeans
