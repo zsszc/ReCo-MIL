@@ -153,5 +153,3 @@ This paper has been submitted to **ICPR 2026**.
 The full citation will be available here after acceptance.
 
 If you find this code useful for your research, please star this repository to stay updated!
-
-```
